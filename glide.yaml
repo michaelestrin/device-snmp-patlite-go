@@ -1,0 +1,16 @@
+package: github.com/edgexfoundry/device-snmp-patlite-go
+import:
+- package: github.com/edgexfoundry/edgex-go
+  version: master
+  subpackages:
+  - /pkg/models
+  - /pkg/clients/logging
+- package: github.com/edgexfoundry/device-sdk-go
+  version: master
+  subpackages:
+  - /pkg/models
+  - /pkg/startup
+- package: github.com/soniah/gosnmp
+  version: =1.16
+- package: github.com/golang/mock/gomock
+
