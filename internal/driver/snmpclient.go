@@ -17,8 +17,8 @@ type SNMPClient struct {
 	ipPort uint16
 }
 
-func NewSNMPClient(addr string, port uint16) SNMPClient {
-	return SNMPClient{
+func NewSNMPClient(addr string, port uint16) *SNMPClient {
+	return &SNMPClient{
 		ipAddr: addr,
 		ipPort: port,
 	}
@@ -55,15 +55,18 @@ func (c *SNMPClient) GetValues(commands []DeviceCommand) ([]int, error) {
 		}
 		oids = append(oids, command.operation)
 	}
-	g.Default.Target = c.ipAddr
-	g.Default.Port = c.ipPort
-	err := g.Default.Connect()
-	if err != nil {
-		return results, err
-	}
-	defer g.Default.Conn.Close()
 
+	if g.Default.Conn == nil {
+		g.Default.Target = c.ipAddr
+		g.Default.Port = c.ipPort
+		g.Default.Community = COMMUNITY_ACCESS
+		err := g.Default.Connect()
+		if err != nil {
+			return results, err
+		}
+	}
 	packets, err2 := g.Default.Get(oids)
+
 	if err2 != nil {
 		return results, err2
 	}
@@ -90,6 +93,16 @@ func (c *SNMPClient) SetValues(commands []DeviceCommand) ([]int, error) {
 	var results []int
 	var pdus []g.SnmpPDU
 
+	if g.Default.Conn == nil {
+		g.Default.Target = c.ipAddr
+		g.Default.Port = c.ipPort
+		g.Default.Community = COMMUNITY_ACCESS
+		err := g.Default.Connect()
+		if err != nil {
+			return results, err
+		}
+	}
+
 	for _, command := range commands {
 		if command.operation == "" {
 			return results, errors.New("Unknown operation: " + command.operation)
@@ -98,14 +111,6 @@ func (c *SNMPClient) SetValues(commands []DeviceCommand) ([]int, error) {
 		pdu := g.SnmpPDU{Name: command.operation, Type: g.Integer, Value: command.value, Logger: nil}
 		pdus = append(pdus, pdu)
 	}
-	g.Default.Target = c.ipAddr
-	g.Default.Port = c.ipPort
-	g.Default.Community = COMMUNITY_ACCESS
-	err := g.Default.Connect()
-	if err != nil {
-		return results, err
-	}
-	defer g.Default.Conn.Close()
 
 	packets, err2 := g.Default.Set(pdus)
 	if err2 != nil {
@@ -118,4 +123,11 @@ func (c *SNMPClient) SetValues(commands []DeviceCommand) ([]int, error) {
 		results = append(results, int(temp))
 	}
 	return results, nil
+}
+
+
+func (c *SNMPClient) Disconnect() {
+	if g.Default.Conn != nil {
+		g.Default.Conn.Close()
+	}
 }
