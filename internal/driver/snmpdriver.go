@@ -11,6 +11,7 @@ import (
 	ds_models "github.com/edgexfoundry/device-sdk-go/pkg/models"
 	"github.com/edgexfoundry/edgex-go/pkg/clients/logging"
 	"github.com/edgexfoundry/edgex-go/pkg/models"
+	"sync"
 	"time"
 )
 
@@ -19,6 +20,11 @@ type SNMPDriver struct {
 	asyncCh      chan<- *ds_models.AsyncValues
 	switchButton bool
 }
+
+var client *SNMPClient
+//Used to avoid get/set at the same time. If this happens simultaneously, state
+//of the device can get out of sync with command actuation result
+var mu sync.Mutex
 
 // DisconnectDevice handles protocol-specific cleanup when a device
 // is removed.
@@ -48,10 +54,14 @@ func (s *SNMPDriver) HandleReadCommands(addr *models.Addressable, reqs []ds_mode
 	if addr.Port == 0 {
 		port = DEFAULT_PORT
 	}
-	client := NewSNMPClient(addr.Address, port)
+	mu.Lock()
+	if client == nil {
+		client = NewSNMPClient(addr.Address, port)
+	}
 
 	now := time.Now().UnixNano() / int64(time.Millisecond)
 	vals, err2 := client.GetValues(commands)
+	mu.Unlock()
 
 	if err2 != nil {
 		s.lc.Error(fmt.Sprintf("SNMPDriver.HandleReadCommands; %s", err2))
@@ -89,8 +99,13 @@ func (s *SNMPDriver) HandleWriteCommands(addr *models.Addressable, reqs []ds_mod
 	if addr.Port == 0 {
 		port = DEFAULT_PORT
 	}
-	client := NewSNMPClient(addr.Address, port)
+
+	mu.Lock()
+	if client == nil {
+		client = NewSNMPClient(addr.Address, port)
+	}
 	_, err2 := client.SetValues(commands)
+	mu.Unlock()
 
 	if err2 != nil {
 		s.lc.Error(fmt.Sprintf("SNMPDriver.HandleWriteCommands; %s", err2))
@@ -106,5 +121,6 @@ func (s *SNMPDriver) HandleWriteCommands(addr *models.Addressable, reqs []ds_mod
 // readings (if supported).
 func (s *SNMPDriver) Stop(force bool) error {
 	s.lc.Debug(fmt.Sprintf("SNMPDriver.Stop called: force=%v", force))
+	client.Disconnect()
 	return nil
 }
