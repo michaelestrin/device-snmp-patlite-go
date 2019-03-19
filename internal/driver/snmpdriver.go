@@ -11,6 +11,7 @@ import (
 	ds_models "github.com/edgexfoundry/device-sdk-go/pkg/models"
 	"github.com/edgexfoundry/edgex-go/pkg/clients/logging"
 	"github.com/edgexfoundry/edgex-go/pkg/models"
+	"strings"
 	"sync"
 	"time"
 )
@@ -22,6 +23,7 @@ type SNMPDriver struct {
 }
 
 var client *SNMPClient
+
 //Used to avoid get/set at the same time. If this happens simultaneously, state
 //of the device can get out of sync with command actuation result
 var mu sync.Mutex
@@ -84,15 +86,26 @@ func (s *SNMPDriver) HandleReadCommands(addr *models.Addressable, reqs []ds_mode
 func (s *SNMPDriver) HandleWriteCommands(addr *models.Addressable, reqs []ds_models.CommandRequest,
 	params []*ds_models.CommandValue) error {
 
+	/*
+		 * Added hack below to ensure commands are processed in correct order; patlite doesn't trigger if it receives
+	 	 * Timer before ControlState.  Delhi branch of device-sdk-go currently has issue with deserializing wherein
+		 * order is sometimes not preserved.  Issue does not exist in master as of this comment.  Hack added
+		 * to facilitate SED PoC.
+	*/
+
 	var commands []DeviceCommand
-	for i, req := range reqs {
-		s.lc.Debug(fmt.Sprintf("SNMPDriver.HandleWriteCommands: device: %s operation: %v attributes: %v", addr.Name, req.RO.Operation, req.DeviceObject.Attributes))
-		oid := req.DeviceObject.Attributes["oid"].(string)
-		val, err := (params[i]).Int32Value()
-		if err != nil {
-			return err
+	for _, objectText := range []string{"ControlState", "Timer"} {
+		for i, req := range reqs {
+			if strings.HasSuffix(req.RO.Object, objectText) {
+				s.lc.Debug(fmt.Sprintf("SNMPDriver.HandleWriteCommands: device: %s operation: %v attributes: %v", addr.Name, req.RO.Operation, req.DeviceObject.Attributes))
+				oid := req.DeviceObject.Attributes["oid"].(string)
+				val, err := (params[i]).Int32Value()
+				if err != nil {
+					return err
+				}
+				commands = append(commands, NewSetDeviceCommand(oid, int(val)))
+			}
 		}
-		commands = append(commands, NewSetDeviceCommand(oid, int(val)))
 	}
 
 	port := uint16(addr.Port)
